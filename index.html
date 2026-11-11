@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wiggle — WebGPU soft-body test</title>
+<style>
+  :root {
+    --bg: #0e1014; --panel: #161920; --line: #262b36; --text: #e8eaf0; --dim: #8b93a5;
+    --accent: #ff8a5b; --accent-ink: #1a0f08;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid; grid-template-columns: minmax(0, 1fr) 320px;
+    background: var(--bg); color: var(--text);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  #stage { position: relative; display: grid; place-items: center; min-height: 0; padding: 16px; overflow: hidden; }
+  #wrap {
+    position: relative; border-radius: 14px; overflow: hidden; touch-action: none; cursor: grab;
+    background: radial-gradient(120% 90% at 50% 30%, #343a48 0%, #1b1e26 55%, #101216 100%);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+  }
+  #wrap.grabbing { cursor: grabbing; }
+  #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #overlay { pointer-events: none; }
+  #fatal {
+    position: absolute; max-width: 460px; margin: 0; padding: 16px 20px; border-radius: 12px;
+    background: #2a1512; border: 1px solid #6b2a20; color: #ffd9cf; font-size: 14px;
+  }
+  #selftest {
+    position: absolute; left: 24px; top: 24px; margin: 0; padding: 12px 14px; border-radius: 10px;
+    background: rgba(10, 12, 16, .92); border: 1px solid var(--line); font: 12px/1.5 ui-monospace, Menlo, monospace;
+    white-space: pre-wrap; max-width: calc(100% - 48px);
+  }
+  #panel { display: flex; flex-direction: column; gap: 14px; padding: 18px 16px; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; }
+  #panel h1 { margin: 0; font-size: 18px; letter-spacing: .02em; }
+  #panel header p { margin: 2px 0 0; color: var(--dim); }
+  #panel section { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+  #panel h2 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+  .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .seg.four { grid-template-columns: repeat(4, 1fr); }
+  button, select {
+    font: inherit; color: var(--text); background: #1f232d; border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 8px; cursor: pointer;
+  }
+  button:hover, select:hover { border-color: #3a4152; }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 8px; }
+  .row label { color: var(--text); }
+  .row output { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .row input[type=range] { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: var(--accent); }
+  .inline { display: flex; align-items: center; gap: 8px; }
+  .inline select { flex: 1; }
+  .buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  #hud { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); color: var(--dim); font: 11px/1.6 ui-monospace, Menlo, monospace; white-space: pre; }
+  @media (max-width: 820px) {
+    body { grid-template-columns: 1fr; grid-template-rows: minmax(60vh, 1fr) auto; }
+    #panel { border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<main id="stage">
+  <div id="wrap">
+    <canvas id="gpu"></canvas>
+    <canvas id="overlay"></canvas>
+  </div>
+  <p id="fatal" hidden></p>
+  <pre id="selftest" hidden></pre>
+</main>
+<aside id="panel">
+  <header>
+    <h1>Wiggle</h1>
+    <p>WebGPU soft-body test. Drag the body to pull it.</p>
+  </header>
+  <section>
+    <h2>Motion</h2>
+    <div id="presets" class="seg"></div>
+    <div id="motion-sliders"></div>
+    <button id="jolt" type="button">Jolt</button>
+  </section>
+  <section>
+    <h2>Tissue</h2>
+    <div id="tissue-sliders"></div>
+  </section>
+  <section>
+    <h2>View</h2>
+    <div class="inline">
+      <select id="view" aria-label="Debug view">
+        <option value="0">Photo</option>
+        <option value="1">Tissue thickness</option>
+        <option value="2">Skin weights</option>
+        <option value="3">Depth</option>
+        <option value="4">Displacement</option>
+        <option value="5">Mesh</option>
+        <option value="6">Area strain</option>
+      </select>
+      <label class="inline"><input id="rig" type="checkbox"> Rig</label>
+    </div>
+  </section>
+  <section>
+    <h2>Simulation</h2>
+    <div id="speeds" class="seg four"></div>
+    <div class="buttons">
+      <button id="pause" type="button" aria-pressed="false">Pause</button>
+      <button id="step" type="button">Step</button>
+      <button id="reset" type="button">Reset</button>
+    </div>
+  </section>
+  <footer id="hud"></footer>
+</aside>
+<script src="assets/image-data.js"></script>
+<script src="src/shaders/sim.wgsl.js"></script>
+<script src="src/shaders/render.wgsl.js"></script>
+<script src="src/rig.js"></script>
+<script src="src/motion.js"></script>
+<script src="src/wiggle-gpu.js"></script>
+<script src="src/selftest.js"></script>
+<script src="src/main.js"></script>
+</body>
+</html>
