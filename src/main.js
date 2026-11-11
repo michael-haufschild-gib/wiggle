@@ -12,13 +12,13 @@
 
   const DEFAULTS = Object.freeze({
     h: 1 / 960,                   // simulation step (s)
-    cs: 950,                      // shear-wave speed of the tissue's attachment (px/s), ~0.7 m/s
+    cs: 1350,                     // shear-wave speed of the tissue's attachment (px/s), ~1 m/s
     cp: 1000,                     // in-plane wave speed between neighbouring columns (px/s)
     cb: 1500,                     // bulk wave speed for area preservation (px/s), 0 = off
     softness: 1,                  // divides the three wave speeds: 2 = half as stiff
     damping: 1,                   // scales the per-region damping ratios
-    viscosity: 25,                // ripple smoothing rate (1/s)
-    stretchLimit: 0.45,           // tissue cannot be displaced further than this fraction of its thickness
+    viscosity: 60000,             // internal friction (px^2/s): damps ripples far more than bulk motion
+    stretchLimit: 0.3,            // tissue cannot be displaced further than this fraction of its thickness
     sMax: 1,                      // Jacobi relaxation threshold
     kinematicBelow: 8,            // vertices with thinner tissue than this (px) follow the skeleton exactly
     grabHz: 9,                    // stiffness of the pointer grab
@@ -138,9 +138,13 @@
     ctx.font = `${11 / s}px system-ui`;
     ctx.strokeStyle = 'rgba(120, 255, 210, .9)';
     for (const g of W.Rig.REGIONS) {
+      // One quarter-ellipse per quadrant: r = [left, right, up, down].
+      const [x, y] = g.c, [left, right, up, down] = g.r, Q = Math.PI / 2;
       ctx.beginPath();
-      ctx.ellipse(g.c[0], g.c[1], g.r[0], g.r[1], 0, Math.PI, Math.PI * 2);                         // above centre
-      ctx.ellipse(g.c[0], g.c[1], g.r[0], g.r.length < 3 ? g.r[1] : g.r[2], 0, 0, Math.PI);       // below centre
+      ctx.ellipse(x, y, right, down, 0, 0, Q);
+      ctx.ellipse(x, y, left, down, 0, Q, 2 * Q);
+      ctx.ellipse(x, y, left, up, 0, 2 * Q, 3 * Q);
+      ctx.ellipse(x, y, right, up, 0, 3 * Q, 4 * Q);
       ctx.closePath();
       ctx.stroke();
     }

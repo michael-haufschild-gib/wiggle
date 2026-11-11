@@ -22,7 +22,7 @@ struct Globals {
   image: vec4f,      // image width, height (px), kinematic thickness threshold (px), time (s)
   step: vec4f,       // h (s), 1 / (substeps * h), sMax, stretch limit (fraction of thickness)
   material: vec4f,   // cs (px/s), cp (px/s), unused, damping scale
-  material2: vec4f,  // cb (px/s), viscosity blend per substep, (grab omega * h)^2, unused
+  material2: vec4f,  // cb (px/s), near viscosity blend, (grab omega * h)^2, far viscosity blend
   grabA: vec4f,      // grab anchor.xy (rest px), radius (px), active (0 or 1)
   grabD: vec4f,      // drag delta at frame start .xy and frame end .zw (px)
   view: vec4f,       // clip-space scale.xy and offset.xy
@@ -73,6 +73,7 @@ struct Sub { alpha: f32, pad0: f32, pad1: f32, pad2: f32 };
 @group(0) @binding(6) var<storage, read_write> stateOut: array<vec4f>;
 
 const SQRT3 = 1.7320508;
+const FAR = 4;   // stride, in cells, of the long-range viscosity stencil (keep in sync with wiggle-gpu.js)
 
 struct Node {
   p: vec2f,    // predicted position
@@ -106,6 +107,17 @@ fn loadNode(x: i32, y: i32) -> Node {
     n.w = 1.0 / n.d;
   }
   return n;
+}
+
+// Velocity relative to the substrate at grid cell (x, y) in .xy; .z = 1 if the cell exists.
+fn relVelocity(x: i32, y: i32) -> vec3f {
+  let nx = i32(G.grid.x);
+  let ny = i32(G.grid.y);
+  if (x < 0 || y < 0 || x >= nx || y >= ny) { return vec3f(0.0); }
+  let i = u32(y * nx + x);
+  if (rest[i].w < G.image.z) { return vec3f(0.0, 0.0, 1.0); }
+  let tg = tgt[i];
+  return vec3f(stateIn[i].zw - (tg.zw - tg.xy) * G.step.y, 1.0);
 }
 
 // Area constraint of the quad a-b-c-d (signed area = half the cross product of its diagonals).
@@ -216,18 +228,24 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let offLen = length(off);
   if (mat[i].y > 0.0 && offLen > reach) { pNew = c.t + off * (reach / offLen); }
 
-  // Damping acts on the velocity relative to the substrate: a dashpot of ratio zeta, then
-  // viscosity that relaxes towards the neighbours' mean (it removes ripples, not bulk motion).
+  // Damping acts on the velocity relative to the substrate. A dashpot of ratio zeta damps
+  // everything a little. Viscosity (internal friction) relaxes the velocity towards the mean of
+  // the neighbours, which damps a motion in proportion to how sharply it varies in space:
+  // ripples die at once while the whole mass keeps swinging. That frequency-dependent damping
+  // is what separates soft tissue from liquid. The near ring covers the cell scale; the far
+  // ring (FAR cells away) reaches the scale of a body part, which the near ring cannot within
+  // one step.
   var rel = (pNew - x0) / h - c.vt;
   rel *= exp(-2.0 * mat[i].x * G.material.w * omega * h);
-  var relAvg = vec2f(0.0);
-  var count = 0.0;
+  var near = vec3f(0.0);
+  var far = vec3f(0.0);
   for (var k = 0; k < 9; k++) {
-    if (k == 4 || !nb[k].ok) { continue; }
-    relAvg += nb[k].v - nb[k].vt;
-    count += 1.0;
+    if (k == 4) { continue; }
+    if (nb[k].ok) { near += vec3f(nb[k].v - nb[k].vt, 1.0); }
+    far += relVelocity(ix + (k % 3 - 1) * FAR, iy + (k / 3 - 1) * FAR);
   }
-  rel = mix(rel, relAvg / max(count, 1.0), G.material2.y);
+  rel = mix(rel, near.xy / max(near.z, 1.0), G.material2.y);
+  rel = mix(rel, far.xy / max(far.z, 1.0), G.material2.w);
   stateOut[i] = vec4f(pNew, c.vt + rel);
 }
 `;

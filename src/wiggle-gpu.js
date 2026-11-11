@@ -7,6 +7,8 @@
   const SUB_SLOT_BYTES = 256;   // one dynamic-offset uniform slot per substep
   const BONE_FLOATS = 16 * 16;
   const GLOBALS_FLOATS = 36;
+  const FAR_STRIDE = 4;         // cells; must match FAR in the step shader
+  const NEAR_VISCOSITY = 0.15;  // velocity blend with the 8 adjacent vertices, per substep
 
   async function compile(device, label, code) {
     const module = device.createShaderModule({ label, code });
@@ -202,7 +204,11 @@
       g.set([p.h, 1 / (this._lastSub * p.h), p.sMax, p.stretchLimit], 8);
       // Softer tissue = slower waves: softness divides all three wave speeds.
       g.set([p.cs / p.softness, p.cp / p.softness, 0, p.damping], 12);
-      g.set([p.cb / p.softness, 1 - Math.exp(-p.viscosity * p.h), grabStep * grabStep, 0], 16);
+      // Averaging with 8 neighbours at distance L diffuses velocity at 0.375 * blend * L^2 / h;
+      // solve for the blend of the far ring that gives the requested viscosity.
+      const farLen = FAR_STRIDE * 0.5 * (rig.cellX + rig.cellY);
+      const farBlend = Math.min(0.6, (p.viscosity * p.damping * p.h) / (0.375 * farLen * farLen));
+      g.set([p.cb / p.softness, NEAR_VISCOSITY, grabStep * grabStep, farBlend], 16);
       g.set([grab.x, grab.y, grab.radius, grab.active ? 1 : 0], 20);
       g.set([grab.d0[0], grab.d0[1], grab.d1[0], grab.d1[1]], 24);
       g.set(this._view, 28);

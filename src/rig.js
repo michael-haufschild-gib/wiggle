@@ -29,36 +29,52 @@
     { name: 'handR', pivot: [880, 1420, 60], sigma: 30, caps: [[878, 1420, 895, 1520, 50]] },
   ];
 
-  // Soft-tissue regions: ellipses, r = [rx, ry] or [rx, ry above centre, ry below centre]. The
-  // thickness is 'cm' over the inner PLATEAU of the radius and eases to zero at the rim with no
-  // slope at either end, so displacement fades out without a crease. Regions deliberately
-  // overhang the anatomical outline: the outline itself must be able to move, and the stretch
-  // is absorbed where it does not show (plain fabric, smooth skin, transparent margin).
-  // 'zeta' is the damping ratio of a tissue column against its own attachment (a whole region
-  // rings about 1.5x faster than its thickest column because neighbours couple, so its measured
-  // damping ratio is about 2/3 of this). 'freq' scales the attachment frequency (hair is light
-  // and floppy, not a thick layer). 'ringHz' is the ring-down frequency the self-test expects.
-  const PLATEAU = 0.15;
+  // Soft-tissue regions. Each is an ellipse-like footprint with its own radius to the left,
+  // right, top and bottom of the centre: r = [left, right, up, down] in px. Tissue is 'cm' thick
+  // over the inner PLATEAU of every radius and eases to zero at the rim with no slope at either
+  // end.
+  //
+  // The plateau must reach the body part's visible outline, so the part moves as one mass, outline
+  // included; if only the middle moved inside a still outline it would read as liquid sloshing
+  // in a bag. The ring between plateau and rim is where the mesh stretches to make up for that
+  // motion, so each radius is chosen to put the ring where stretch does not show: plain fabric,
+  // smooth skin, or the transparent margin. Where the neighbour is a part that must keep its
+  // shape (the left arm beside the chest) the radius is short and the outline moves less.
+  //
+  // 'zeta' is the damping ratio of a tissue column against its own attachment; 'freq' scales
+  // the attachment frequency (hair is light and floppy, not a thick layer); 'ringHz' is the
+  // ring-down frequency the self-test expects from the region.
+  const PLATEAU = 0.33;
   const REGIONS = [
-    { name: 'chestL', c: [392, 812], r: [230, 230, 215], cm: 10.5, zeta: 0.3, freq: 1, ringHz: 2.7 },
-    { name: 'chestR', c: [684, 802], r: [230, 230, 215], cm: 10.5, zeta: 0.3, freq: 1 },
-    { name: 'belly', c: [530, 1120], r: [210, 170], cm: 3.0, zeta: 0.45, freq: 1 },
-    { name: 'hipL', c: [300, 1310], r: [170, 230], cm: 4.5, zeta: 0.45, freq: 1 },
-    { name: 'hipR', c: [770, 1310], r: [170, 230], cm: 4.5, zeta: 0.45, freq: 1 },
-    { name: 'thighL', c: [370, 1500], r: [220, 170], cm: 5.0, zeta: 0.45, freq: 1 },
-    { name: 'thighR', c: [730, 1500], r: [220, 170], cm: 5.0, zeta: 0.45, freq: 1 },
-    { name: 'armL', c: [165, 780], r: [85, 220], cm: 2.5, zeta: 0.55, freq: 1 },
-    { name: 'hairBun', c: [445, 75], r: [150, 95], cm: 3.0, zeta: 0.4, freq: 0.5 },
-    { name: 'hairL', c: [318, 340], r: [60, 190], cm: 2.5, zeta: 0.4, freq: 0.45 },
-    { name: 'hairR', c: [628, 330], r: [55, 170], cm: 2.5, zeta: 0.4, freq: 0.45 },
+    { name: 'chestL', c: [395, 800], r: [215, 300, 210, 283], cm: 10.5, zeta: 0.15, freq: 1, ringHz: 2.5 },
+    { name: 'chestR', c: [684, 800], r: [300, 320, 210, 283], cm: 10.5, zeta: 0.15, freq: 1 },
+    { name: 'belly', c: [530, 1120], r: [210, 210, 170, 170], cm: 3.0, zeta: 0.3, freq: 1 },
+    { name: 'hipL', c: [300, 1310], r: [170, 170, 230, 230], cm: 4.5, zeta: 0.3, freq: 1 },
+    { name: 'hipR', c: [770, 1310], r: [170, 170, 230, 230], cm: 4.5, zeta: 0.3, freq: 1 },
+    { name: 'thighL', c: [370, 1500], r: [220, 220, 170, 170], cm: 5.0, zeta: 0.3, freq: 1 },
+    { name: 'thighR', c: [730, 1500], r: [220, 220, 170, 170], cm: 5.0, zeta: 0.3, freq: 1 },
+    { name: 'armL', c: [165, 780], r: [85, 85, 220, 220], cm: 2.5, zeta: 0.4, freq: 1 },
+    { name: 'hairBun', c: [445, 75], r: [150, 150, 95, 95], cm: 3.0, zeta: 0.3, freq: 0.5 },
+    { name: 'hairL', c: [318, 340], r: [60, 60, 190, 190], cm: 2.5, zeta: 0.3, freq: 0.45 },
+    { name: 'hairR', c: [628, 330], r: [55, 55, 170, 170], cm: 2.5, zeta: 0.3, freq: 0.45 },
   ];
+
+  /** Tissue thickness (px) of region g at image point (x, y); 0 outside its rim. */
+  function regionThickness(g, x, y) {
+    const dx = x - g.c[0];
+    const dy = y - g.c[1];
+    const q = Math.hypot(dx / (dx < 0 ? g.r[0] : g.r[1]), dy / (dy < 0 ? g.r[2] : g.r[3]));
+    if (q >= 1) return 0;
+    const e = Math.max(0, (q - PLATEAU) / (1 - PLATEAU));
+    return cm(g.cm) * (1 - e * e * (3 - 2 * e));
+  }
 
   const DEPTH_RADIUS = 130;   // px: half-depth of the torso, used to inflate the silhouette
   // Thickness may not change faster than this per px. Tissue can be displaced by at most
-  // stretchLimit * thickness (0.45), so neighbours pushed to their limits differ by at most
-  // 0.45 * 1.5 = 0.68 px per px and the mesh cannot fold over itself.
+  // stretchLimit * thickness (0.3), so neighbours pushed to their limits differ by at most
+  // 0.3 * 1.5 = 0.45 px per px and the mesh cannot fold over itself.
   const MAX_THICKNESS_SLOPE = 1.5;
-  const MARGIN_PX = 80;       // how far the tissue maps are extended into transparent areas
+  const MARGIN_PX = 100;      // how far the tissue maps are extended into transparent areas
   const MARGIN_DECAY = 0.975; // thickness (so mass and coupling) falloff per px across the margin
 
   function distToSegment(px, py, x0, y0, x1, y1) {
@@ -167,12 +183,7 @@
       const y = Math.floor(i / nx) * cellY;
       for (let k = 0; k < REGIONS.length; k++) {
         const g = REGIONS[k];
-        const qx = (x - g.c[0]) / g.r[0];
-        const qy = (y - g.c[1]) / (y < g.c[1] || g.r.length < 3 ? g.r[1] : g.r[2]);
-        const q = Math.hypot(qx, qy);
-        if (q >= 1) continue;
-        const e = Math.max(0, (q - PLATEAU) / (1 - PLATEAU));
-        const d = cm(g.cm) * (1 - e * e * (3 - 2 * e));
+        const d = regionThickness(g, x, y);
         if (d > thick[i]) { thick[i] = d; zeta[i] = g.zeta; freq[i] = g.freq; region[i] = k; }
       }
     }
@@ -203,15 +214,6 @@
       }
     }
 
-    // Depth: inflate the silhouette to a rounded cross-section and add the tissue on top.
-    const dist = insideDistance(cov, nx, ny, cellX, cellY);
-    let depth = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      const q = 1 - Math.min(dist[i] / DEPTH_RADIUS, 1);
-      depth[i] = DEPTH_RADIUS * Math.sqrt(1 - q * q) + 0.9 * thick[i];
-    }
-    depth = boxBlur(depth, nx, ny, 2);
-
     // Extend the tissue maps into transparent areas so silhouettes can move. Margin vertices get
     // a frequency multiplier of 0 (no attachment): they are light followers that stretch between
     // the moving outline and the kinematic background instead of pinning the outline.
@@ -234,6 +236,19 @@
       }
       thick.set(next);
     }
+
+    // Depth: inflate the silhouette to a rounded cross-section and add the tissue on top. It
+    // uses the extended thickness, so a protruding part keeps its depth right up to and past its
+    // outline: when the torso turns, the part shifts sideways as a whole, outline included.
+    // The cross-section is a quarter sine, not a circle: a circle's depth rises vertically at
+    // the outline, and a yaw then folds the outermost cells over themselves. The sine's slope
+    // is at most pi / 2, so cells only foreshorten.
+    const dist = insideDistance(cov, nx, ny, cellX, cellY);
+    let depth = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      depth[i] = DEPTH_RADIUS * Math.sin((Math.PI / 2) * Math.min(dist[i] / DEPTH_RADIUS, 1)) + 0.9 * thick[i];
+    }
+    depth = boxBlur(depth, nx, ny, 2);
 
     // Skin weights: logistic falloff of the signed distance to each bone's capsules, top 4.
     const skinIdx = new Uint32Array(n * 4);
@@ -264,16 +279,11 @@
       mat.set([zeta[i], freq[i], cov[i], region[i]], i * 4);
     }
 
-    // Probes: the thickest vertex of each region, and a vertex on the face.
-    const probes = {};
-    REGIONS.forEach((g, k) => {
-      let best = -1;
-      for (let i = 0; i < n; i++) {
-        if (region[i] === k && cov[i] >= 0.5 && (best < 0 || thick[i] > thick[best])) best = i;
-      }
-      probes[g.name] = best;
-    });
-    probes.face = Math.round((270 / IMAGE_H) * (ny - 1)) * nx + Math.round((480 / IMAGE_W) * (nx - 1));
+    // Probes: the vertex at each region's centre, one on the right breast's free outline and
+    // one on the face.
+    const vertexAt = (x, y) => Math.round((y / IMAGE_H) * (ny - 1)) * nx + Math.round((x / IMAGE_W) * (nx - 1));
+    const probes = { face: vertexAt(480, 270), chestOutline: vertexAt(815, 800) };
+    for (const g of REGIONS) probes[g.name] = vertexAt(g.c[0], g.c[1]);
 
     return { nx, ny, n, cellX, cellY, rest, mat, skinIdx, skinW, probes };
   }
