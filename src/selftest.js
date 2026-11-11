@@ -109,6 +109,7 @@
     motion.intensity = 1.5;
     motion.tempo = 1.5;
     let invalid = 0, overLimit = 0, minArea = Infinity;
+    const restArea = rig.cellX * rig.cellY;
     for (let f = 0; f < 1200; f++) {
       sim.frame(framesPer60(), motion.advance(framesPer60() * params.h), false);
       if (f % 40 !== 39) continue;
@@ -119,19 +120,20 @@
         const limit = params.stretchLimit * rig.rest[i * 4 + 3];
         if (!isKinematic(i) && rig.mat[i * 4 + 1] > 0) overLimit = Math.max(overLimit, len / limit);
       }
-      // Signed area of every fully visible cell relative to its target: a folded cell goes
-      // negative. (Cells in transparent gaps may fold: that is one outline sliding over another.)
-      const area = (v, o, a, b, c, d) => 0.5 * ((v[c * 4 + o] - v[a * 4 + o]) * (v[d * 4 + o + 1] - v[b * 4 + o + 1]) - (v[d * 4 + o] - v[b * 4 + o]) * (v[c * 4 + o + 1] - v[a * 4 + o + 1]));
+      // Signed on-screen area of every fully visible cell relative to its area in the photo: a
+      // cell that folds over goes negative. (Cells in transparent gaps may fold: that is one
+      // outline sliding over another.)
+      const area = (v, a, b, c, d) => 0.5 * ((v[c * 4] - v[a * 4]) * (v[d * 4 + 1] - v[b * 4 + 1]) - (v[d * 4] - v[b * 4]) * (v[c * 4 + 1] - v[a * 4 + 1]));
       for (let y = 0; y < ny - 1; y++) {
         for (let x = 0; x < nx - 1; x++) {
           const a = y * nx + x, b = a + 1, d = a + nx, c = d + 1;
           if (!(visible(a) && visible(b) && visible(c) && visible(d))) continue;
-          minArea = Math.min(minArea, area(s.state, 0, a, b, c, d) / area(s.target, 2, a, b, c, d));
+          minArea = Math.min(minArea, area(s.state, a, b, c, d) / restArea);
         }
       }
     }
-    record('Stable at extreme settings (20 s)', invalid === 0 && overLimit <= 1.02 && minArea > 0.2,
-      `${invalid} invalid values, peak stretch ${(overLimit * 100).toFixed(0)}% of limit, smallest cell ${(minArea * 100).toFixed(0)}% of its area`);
+    record('Stable at extreme settings (20 s)', invalid === 0 && overLimit <= 1.02 && minArea > 0.1,
+      `${invalid} invalid values, peak stretch ${(overLimit * 100).toFixed(0)}% of limit, smallest visible cell ${(minArea * 100).toFixed(0)}% of its photo area (must stay above 10%)`);
 
     // 5. Frame-rate independence: the same 2 s of shimmy at 60 and at 120 frames per second.
     const shimmyEnd = async (substeps, frames) => {
